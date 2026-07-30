@@ -6,6 +6,7 @@ import type {
   TmdbTVDetails,
   TmdbSeasonDetails,
   TmdbPersonDetails,
+  TmdbChangesResponse,
 } from '@/types/tmdb'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
@@ -126,4 +127,15 @@ export function discoverMoviesByLanguage(languageCode: string, page = 1) {
     page,
     sort_by: 'popularity.desc',
   })
+}
+
+// ---- changes (for incremental/daily refresh — see syncIncrementalChanges) ----
+// TMDb only accepts a <=14-day window per call, hence the small default in
+// lib/sync.ts. Results carry no language/region — caller must cross-check
+// ids against what's already in the catalog.
+export function getMovieChangeIds(startDate: string, endDate: string, page = 1) {
+  return tmdbFetch<TmdbChangesResponse>('/movie/changes', { start_date: startDate, end_date: endDate, page })
+}
+export function getTVChangeIds(startDate: string, endDate: string, page = 1) {
+  return tmdbFetch<TmdbChangesResponse>('/tv/changes', { start_date: startDate, end_date: endDate, page })
 }

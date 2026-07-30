@@ -62,7 +62,12 @@ export default async function TVPage({ searchParams }: { searchParams: Promise<R
         ))}
       </div>
       {!shows?.length && <p className="py-12 text-center text-muted dark:text-mutedDark">No series match those filters yet.</p>}
-      <Pagination basePath="/tv" searchParams={sp} page={page} hasMore={hasMore} />
+      <Pagination
+  basePath="/movies"
+  searchParams={sp}
+  page={page}
+  totalPages={count ? Math.ceil(count / PAGE_SIZE) : 1}
+/>
     </div>
   )
 }

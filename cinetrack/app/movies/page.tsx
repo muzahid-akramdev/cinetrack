@@ -63,7 +63,12 @@ export default async function MoviesPage({ searchParams }: { searchParams: Promi
         ))}
       </div>
       {!movies?.length && <p className="py-12 text-center text-muted dark:text-mutedDark">No movies match those filters yet.</p>}
-      <Pagination basePath="/movies" searchParams={sp} page={page} hasMore={hasMore} />
+      <Pagination
+  basePath="/movies"
+  searchParams={sp}
+  page={page}
+  totalPages={count ? Math.ceil(count / PAGE_SIZE) : 1}
+/>
     </div>
   )
 }

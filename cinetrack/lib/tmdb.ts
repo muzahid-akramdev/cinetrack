@@ -77,7 +77,16 @@ export const TV_GENRE_MAP: Record<number, string> = {
 // Regions called out explicitly in the spec. See README for the note on `bn`
 // (Bengali) picking up West Bengal, India productions alongside Bangladeshi ones.
 export const TV_ORIGIN_COUNTRIES = ['KR', 'TR', 'IN', 'PK', 'BD'] as const
-export const MOVIE_ORIGINAL_LANGUAGES = ['ko', 'tr', 'hi', 'bn', 'ta', 'te', 'ml', 'kn', 'pa', 'ur'] as const
+// English-original movies were missing from every preference bucket because
+// nothing ever discovered by `en` — added here so the regular movie sweep
+// (and the deep backfill in scripts/full-sync.ts) picks it up like any other
+// tracked language.
+export const MOVIE_ORIGINAL_LANGUAGES = ['ko', 'tr', 'hi', 'bn', 'ta', 'te', 'ml', 'kn', 'pa', 'ur', 'en'] as const
+// English-language TV shows come out of many different countries (US, GB,
+// CA, AU, IE...), so — unlike the Korean/Turkish/Indian/Pakistani/Bangladeshi
+// sweep above, which is keyed by a single origin country — English TV is
+// swept by original_language instead, the same way movies are.
+export const TV_ORIGINAL_LANGUAGES = ['en'] as const
 
 // ---- search ----
 export function searchMovies(query: string, page = 1) {
@@ -114,18 +123,118 @@ export function getPopularMovies(page = 1) {
 export function getPopularTV(page = 1) {
   return tmdbFetch<TmdbPaged<TmdbTVListItem>>('/tv/popular', { page })
 }
-export function discoverTVByOriginCountry(countryCode: string, page = 1) {
+// `extra` lets callers add filters like `first_air_date_year` /
+// `primary_release_year` without a new function per filter — used by
+// pagedYearChunked() in lib/sync.ts to split a broad query into per-year
+// slices, since TMDb discover only ever returns up to page 500
+// (10,000 results) for a single query no matter how high `page` goes.
+export function discoverTVByOriginCountry(
+  countryCode: string,
+  page = 1,
+  extra: Record<string, string | number | undefined> = {}
+) {
   return tmdbFetch<TmdbPaged<TmdbTVListItem>>('/discover/tv', {
     with_origin_country: countryCode,
     page,
     sort_by: 'popularity.desc',
+    include_adult: 'false',
+    ...extra,
   })
 }
-export function discoverMoviesByLanguage(languageCode: string, page = 1) {
+export function discoverTVByLanguage(
+  languageCode: string,
+  page = 1,
+  extra: Record<string, string | number | undefined> = {}
+) {
+  return tmdbFetch<TmdbPaged<TmdbTVListItem>>('/discover/tv', {
+    with_original_language: languageCode,
+    page,
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+    ...extra,
+  })
+}
+export function discoverMoviesByLanguage(
+  languageCode: string,
+  page = 1,
+  extra: Record<string, string | number | undefined> = {}
+) {
   return tmdbFetch<TmdbPaged<TmdbMovieListItem>>('/discover/movie', {
     with_original_language: languageCode,
     page,
     sort_by: 'popularity.desc',
+    include_adult: 'false',
+    ...extra,
+  })
+}
+
+// ---- watch providers (OTT platforms) ----
+// TMDb (via JustWatch) doesn't reliably expose `BD` as a discover watch
+// region, so Bangladeshi OTT platforms — hoichoi, Chorki, Zee5, Bongo,
+// Addatimes — are looked up under `IN`, which does carry them. Provider ids
+// are resolved by name against the live list instead of being hardcoded,
+// since TMDb can renumber them.
+interface TmdbWatchProvider {
+  provider_id: number
+  provider_name: string
+}
+
+const watchProviderListCache = new Map<string, TmdbWatchProvider[]>()
+
+async function getWatchProviderList(mediaType: 'movie' | 'tv', watchRegion: string) {
+  const cacheKey = `${mediaType}:${watchRegion}`
+  const cached = watchProviderListCache.get(cacheKey)
+  if (cached) return cached
+  const res = await tmdbFetch<{ results: TmdbWatchProvider[] }>(`/watch/providers/${mediaType}`, {
+    watch_region: watchRegion,
+  })
+  watchProviderListCache.set(cacheKey, res.results)
+  return res.results
+}
+
+/** Resolves human platform names (case-insensitive substring match, e.g.
+ * "Zee5" also matches "ZEE5") to TMDb's numeric provider ids for a region.
+ * Names with no match are silently skipped — callers should treat an empty
+ * return as "nothing to sync" rather than an error, since provider
+ * availability varies by region and TMDb's catalog changes over time. */
+export async function resolveWatchProviderIds(mediaType: 'movie' | 'tv', watchRegion: string, names: string[]) {
+  const list = await getWatchProviderList(mediaType, watchRegion)
+  const ids: number[] = []
+  for (const name of names) {
+    const match = list.find((p) => p.provider_name.toLowerCase().includes(name.toLowerCase()))
+    if (match) ids.push(match.provider_id)
+  }
+  return ids
+}
+
+export function discoverMoviesByWatchProviders(
+  watchRegion: string,
+  providerIds: number[],
+  page = 1,
+  extra: Record<string, string | number | undefined> = {}
+) {
+  return tmdbFetch<TmdbPaged<TmdbMovieListItem>>('/discover/movie', {
+    watch_region: watchRegion,
+    with_watch_providers: providerIds.join('|'),
+    page,
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+    ...extra,
+  })
+}
+export function discoverTVByWatchProviders(
+  watchRegion: string,
+  providerIds: number[],
+  page = 1,
+  extra: Record<string, string | number | undefined> = {}
+) {
+  return tmdbFetch<TmdbPaged<TmdbTVListItem>>('/discover/tv', {
+    watch_region: watchRegion,
+    with_watch_providers: providerIds.join('|'),
+    page,
+    sort_by: 'popularity.desc',
+    include_adult: 'false',
+    ...extra,
   })
 }
 

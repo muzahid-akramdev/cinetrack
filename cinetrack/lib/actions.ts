@@ -139,35 +139,88 @@ export async function upsertReview(input: {
   const { supabase, user } = await requireUser()
   const column = input.movieId ? 'movie_id' : 'tv_show_id'
   const value = input.movieId ?? input.tvShowId
-  const onConflict = input.movieId ? 'user_id,movie_id' : 'user_id,tv_show_id'
+  if (!value) throw new Error('Missing title id.')
 
-  const { error } = await supabase.from('reviews').upsert(
-    {
+  // Partial unique indexes break PostgREST upsert — do select then update/insert
+  const { data: existing } = await supabase
+    .from('reviews')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq(column, value)
+    .maybeSingle()
+
+  const payload = {
+    rating: input.rating,
+    body: input.body.trim(),
+    has_spoilers: input.hasSpoilers,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (existing) {
+    const { error } = await supabase.from('reviews').update(payload).eq('id', existing.id)
+    if (error) throw new Error(error.message)
+  } else {
+    const { error } = await supabase.from('reviews').insert({
       user_id: user.id,
       [column]: value,
-      rating: input.rating,
-      body: input.body.trim(),
-      has_spoilers: input.hasSpoilers,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict }
-  )
-  if (error) throw error
+      ...payload,
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  // Also save rating on watched / show_progress so profile shows it
+  if (input.movieId) {
+    await supabase.from('watched').upsert(
+      {
+        user_id: user.id,
+        movie_id: input.movieId,
+        rating: input.rating,
+        watched_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,movie_id' }
+    )
+  } else if (input.tvShowId) {
+    await supabase.from('show_progress').upsert(
+      {
+        user_id: user.id,
+        tv_show_id: input.tvShowId,
+        rating: input.rating,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,tv_show_id' }
+    )
+  }
+
   revalidatePath(input.path)
+  revalidatePath('/me/watched')
 }
 
 export async function deleteReview(input: { reviewId: string; path: string }) {
   const { supabase, user } = await requireUser()
-  await supabase.from('reviews').delete().eq('id', input.reviewId).eq('user_id', user.id)
+  const { error } = await supabase
+    .from('reviews')
+    .delete()
+    .eq('id', input.reviewId)
+    .eq('user_id', user.id)
+  if (error) throw new Error(error.message)
   revalidatePath(input.path)
 }
 
 export async function toggleReviewLike(input: { reviewId: string; path: string }) {
   const { supabase, user } = await requireUser()
-  const { data: existing } = await supabase.from('review_likes').select('*').eq('review_id', input.reviewId).eq('user_id', user.id).maybeSingle()
+  const { data: existing } = await supabase
+    .from('review_likes')
+    .select('*')
+    .eq('review_id', input.reviewId)
+    .eq('user_id', user.id)
+    .maybeSingle()
 
   if (existing) {
-    await supabase.from('review_likes').delete().eq('review_id', input.reviewId).eq('user_id', user.id)
+    await supabase
+      .from('review_likes')
+      .delete()
+      .eq('review_id', input.reviewId)
+      .eq('user_id', user.id)
     revalidatePath(input.path)
     return { liked: false }
   }

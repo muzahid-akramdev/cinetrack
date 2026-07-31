@@ -132,22 +132,4 @@ export interface TmdbPersonDetails {
     cast: TmdbCombinedCreditItem[]
     crew: TmdbCombinedCreditItem[]
   }
-}  poster_path: string | null
-  character?: string
-  job?: string
-  release_date?: string
-  first_air_date?: string
-  vote_average: number
-}
-
-export interface TmdbPersonDetails {
-  id: number
-  name: string
-  profile_path: string | null
-  known_for_department: string | null
-  biography?: string
-  combined_credits?: {
-    cast: TmdbCombinedCreditItem[]
-    crew: TmdbCombinedCreditItem[]
-  }
 }

@@ -13,7 +13,10 @@ export function FilterBar({
   countries: { code: string; label: string }[]
 }) {
   return (
-    <form method="get" className="flex flex-wrap items-end gap-3 rounded-xl border border-line p-4 dark:border-lineDark">
+    <form
+      method="get"
+      className="flex flex-wrap items-end gap-3 rounded-xl border border-line p-4 dark:border-lineDark"
+    >
       <Field label="Genre">
         <select name="genre" defaultValue={searchParams.genre ?? ''} className="select">
           <option value="">All genres</option>
@@ -24,6 +27,7 @@ export function FilterBar({
           ))}
         </select>
       </Field>
+
       <Field label="Language">
         <select name="language" defaultValue={searchParams.language ?? ''} className="select">
           <option value="">All languages</option>
@@ -34,6 +38,7 @@ export function FilterBar({
           ))}
         </select>
       </Field>
+
       <Field label="Country">
         <select name="country" defaultValue={searchParams.country ?? ''} className="select">
           <option value="">All countries</option>
@@ -44,6 +49,7 @@ export function FilterBar({
           ))}
         </select>
       </Field>
+
       <Field label="Year">
         <input
           type="number"
@@ -53,6 +59,7 @@ export function FilterBar({
           className="input w-24"
         />
       </Field>
+
       <Field label="Min rating">
         <input
           type="number"
@@ -65,6 +72,7 @@ export function FilterBar({
           className="input w-24"
         />
       </Field>
+
       <Field label="Sort by">
         <select name="sort" defaultValue={searchParams.sort ?? 'popularity'} className="select">
           <option value="popularity">Popularity</option>
@@ -73,6 +81,7 @@ export function FilterBar({
           <option value="az">A–Z</option>
         </select>
       </Field>
+
       <button type="submit" className="btn-primary">
         Apply
       </button>
@@ -93,40 +102,41 @@ export function Pagination({
   basePath,
   searchParams,
   page,
-  totalPages,
-  hasMore,
+  totalPages = 1,
 }: {
   basePath: string
   searchParams: Record<string, string | undefined>
   page: number
   totalPages?: number
-  /** @deprecated use totalPages instead */
-  hasMore?: boolean
 }) {
-  const pages = totalPages ?? (hasMore ? page + 1 : page)
-  if (pages <= 1) return null
+  const safeTotal = Math.max(1, Number.isFinite(totalPages) ? totalPages : 1)
+  const safePage = Math.min(Math.max(1, page), safeTotal)
 
-  const makeHref = (p: number) => {
-    const sp = new URLSearchParams()
-    for (const [k, v] of Object.entries(searchParams)) {
-      if (v != null && k !== 'page') sp.set(k, v)
+  if (safeTotal <= 1) return null
+
+  function makeHref(p: number) {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(searchParams)) {
+      if (key === 'page') continue
+      if (value == null || value === '') continue
+      params.set(key, String(value))
     }
-    sp.set('page', String(p))
-    return `\( {basePath}? \){sp.toString()}`
+    params.set('page', String(p))
+    const qs = params.toString()
+    return qs ? `\( {basePath}? \){qs}` : basePath
   }
 
-  // Show a window of page numbers around current page
   const windowSize = 2
-  const start = Math.max(1, page - windowSize)
-  const end = Math.min(pages, page + windowSize)
+  const start = Math.max(1, safePage - windowSize)
+  const end = Math.min(safeTotal, safePage + windowSize)
   const nums: number[] = []
   for (let i = start; i <= end; i++) nums.push(i)
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-2 py-8">
-      {page > 1 ? (
+      {safePage > 1 ? (
         <Link
-          href={makeHref(page - 1)}
+          href={makeHref(safePage - 1)}
           className="btn-ghost flex items-center gap-1 border border-line dark:border-lineDark"
         >
           <ChevronLeft className="h-4 w-4" /> Prev
@@ -137,31 +147,31 @@ export function Pagination({
 
       {start > 1 && (
         <>
-          <PageLink href={makeHref(1)} active={page === 1}>
+          <PageNum href={makeHref(1)} active={safePage === 1}>
             1
-          </PageLink>
+          </PageNum>
           {start > 2 && <span className="px-1 text-muted dark:text-mutedDark">…</span>}
         </>
       )}
 
       {nums.map((n) => (
-        <PageLink key={n} href={makeHref(n)} active={n === page}>
+        <PageNum key={n} href={makeHref(n)} active={n === safePage}>
           {n}
-        </PageLink>
+        </PageNum>
       ))}
 
-      {end < pages && (
+      {end < safeTotal && (
         <>
-          {end < pages - 1 && <span className="px-1 text-muted dark:text-mutedDark">…</span>}
-          <PageLink href={makeHref(pages)} active={page === pages}>
-            {pages}
-          </PageLink>
+          {end < safeTotal - 1 && <span className="px-1 text-muted dark:text-mutedDark">…</span>}
+          <PageNum href={makeHref(safeTotal)} active={safePage === safeTotal}>
+            {safeTotal}
+          </PageNum>
         </>
       )}
 
-      {page < pages ? (
+      {safePage < safeTotal ? (
         <Link
-          href={makeHref(page + 1)}
+          href={makeHref(safePage + 1)}
           className="btn-ghost flex items-center gap-1 border border-line dark:border-lineDark"
         >
           Next <ChevronRight className="h-4 w-4" />
@@ -173,7 +183,15 @@ export function Pagination({
   )
 }
 
-function PageLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function PageNum({
+  href,
+  active,
+  children,
+}: {
+  href: string
+  active: boolean
+  children: React.ReactNode
+}) {
   return (
     <Link
       href={href}

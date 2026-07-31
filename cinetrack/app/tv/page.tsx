@@ -63,10 +63,17 @@ export default async function TVPage({ searchParams }: { searchParams: Promise<R
       </div>
       {!shows?.length && <p className="py-12 text-center text-muted dark:text-mutedDark">No series match those filters yet.</p>}
       <Pagination
-  basePath="/movies"
-  searchParams={sp}
+  basePath="/tv"
+  searchParams={{
+    genre: sp.genre,
+    language: sp.language,
+    country: sp.country,
+    year: sp.year,
+    min_rating: sp.min_rating,
+    sort: sp.sort,
+  }}
   page={page}
-  totalPages={count ? Math.ceil(count / PAGE_SIZE) : 1}
+  totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE))}
 />
     </div>
   )

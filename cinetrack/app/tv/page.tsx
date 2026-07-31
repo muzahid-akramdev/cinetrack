@@ -7,16 +7,32 @@ export const revalidate = 3600
 const PAGE_SIZE = 24
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  en: 'English', ko: 'Korean', tr: 'Turkish', hi: 'Hindi', bn: 'Bengali',
-  ur: 'Urdu', ja: 'Japanese', es: 'Spanish',
+  en: 'English',
+  ko: 'Korean',
+  tr: 'Turkish',
+  hi: 'Hindi',
+  bn: 'Bengali',
+  ur: 'Urdu',
+  ja: 'Japanese',
+  es: 'Spanish',
 }
 
 const COUNTRY_LABELS: Record<string, string> = {
-  KR: 'South Korea', TR: 'Turkey', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh',
-  US: 'United States', GB: 'United Kingdom', JP: 'Japan',
+  KR: 'South Korea',
+  TR: 'Turkey',
+  IN: 'India',
+  PK: 'Pakistan',
+  BD: 'Bangladesh',
+  US: 'United States',
+  GB: 'United Kingdom',
+  JP: 'Japan',
 }
 
-export default async function TVPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+export default async function TVPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>
+}) {
   const sp = await searchParams
   const page = Math.max(1, Number(sp.page ?? '1'))
   const supabase = await createClient()
@@ -26,7 +42,11 @@ export default async function TVPage({ searchParams }: { searchParams: Promise<R
   if (sp.genre) query = query.contains('genres', [sp.genre])
   if (sp.language) query = query.eq('original_language', sp.language)
   if (sp.country) query = query.contains('origin_country', [sp.country])
-  if (sp.year) query = query.gte('first_air_date', `${sp.year}-01-01`).lte('first_air_date', `${sp.year}-12-31`)
+  if (sp.year) {
+    query = query
+      .gte('first_air_date', sp.year + '-01-01')
+      .lte('first_air_date', sp.year + '-12-31')
+  }
   if (sp.min_rating) query = query.gte('tmdb_rating', Number(sp.min_rating))
 
   switch (sp.sort) {
@@ -45,7 +65,7 @@ export default async function TVPage({ searchParams }: { searchParams: Promise<R
 
   const from = (page - 1) * PAGE_SIZE
   const { data: shows, count } = await query.range(from, from + PAGE_SIZE - 1)
-  const hasMore = count ? from + PAGE_SIZE < count : false
+  const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE))
 
   return (
     <div>
@@ -53,28 +73,45 @@ export default async function TVPage({ searchParams }: { searchParams: Promise<R
       <FilterBar
         searchParams={sp}
         genres={Object.values(TV_GENRE_MAP)}
-        languages={Object.entries(LANGUAGE_LABELS).map(([code, label]) => ({ code, label }))}
-        countries={[...TV_ORIGIN_COUNTRIES, 'US', 'GB', 'JP'].map((code) => ({ code, label: COUNTRY_LABELS[code] ?? code }))}
+        languages={Object.entries(LANGUAGE_LABELS).map(function (entry) {
+          return { code: entry[0], label: entry[1] }
+        })}
+        countries={[...TV_ORIGIN_COUNTRIES, 'US', 'GB', 'JP'].map(function (code) {
+          return { code: code, label: COUNTRY_LABELS[code] ?? code }
+        })}
       />
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {(shows ?? []).map((s) => (
-          <MediaCard key={s.id} title={s.name} year={s.first_air_date?.slice(0, 4)} posterPath={s.poster_path} rating={s.tmdb_rating} href={`/tv/${s.id}`} />
-        ))}
+        {(shows ?? []).map(function (s) {
+          return (
+            <MediaCard
+              key={s.id}
+              title={s.name}
+              year={s.first_air_date ? s.first_air_date.slice(0, 4) : null}
+              posterPath={s.poster_path}
+              rating={s.tmdb_rating}
+              href={'/tv/' + s.id}
+            />
+          )
+        })}
       </div>
-      {!shows?.length && <p className="py-12 text-center text-muted dark:text-mutedDark">No series match those filters yet.</p>}
+      {!shows?.length && (
+        <p className="py-12 text-center text-muted dark:text-mutedDark">
+          No series match those filters yet.
+        </p>
+      )}
       <Pagination
-  basePath="/tv"
-  searchParams={{
-    genre: sp.genre,
-    language: sp.language,
-    country: sp.country,
-    year: sp.year,
-    min_rating: sp.min_rating,
-    sort: sp.sort,
-  }}
-  page={page}
-  totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE))}
-/>
+        basePath="/tv"
+        searchParams={{
+          genre: sp.genre,
+          language: sp.language,
+          country: sp.country,
+          year: sp.year,
+          min_rating: sp.min_rating,
+          sort: sp.sort,
+        }}
+        page={page}
+        totalPages={totalPages}
+      />
     </div>
   )
 }

@@ -1,7 +1,20 @@
 name: Full TMDb backfill
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'Comma list: trending,tv,tv_lang,wikidata,ott,movies (or "all")'
+        required: false
+        default: 'all'
+      from_year:
+        description: 'First release/air year to include (blank = 1930)'
+        required: false
+        default: ''
+      to_year:
+        description: 'Last release/air year to include (blank = next year)'
+        required: false
+        default: ''
 
 jobs:
   full-sync:
@@ -27,3 +40,6 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+          FULL_SYNC_SOURCES: ${{ github.event.inputs.sources }}
+          FULL_SYNC_FROM_YEAR: ${{ github.event.inputs.from_year }}
+          FULL_SYNC_TO_YEAR: ${{ github.event.inputs.to_year }}

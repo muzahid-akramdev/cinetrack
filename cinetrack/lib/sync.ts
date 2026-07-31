@@ -283,6 +283,63 @@ async function paged<T>(fetchPage: (page: number) => Promise<{ results: T[]; tot
   return items
 }
 
+/**
+ * Exhaustive alternative to paged(): walks one release year at a time
+ * instead of trusting a single maxPages ceiling.
+ *
+ * The real reason the old deep backfill topped out at ~800 titles per
+ * language/country wasn't just that DEEP_MAX_PAGES was 40 — even raising
+ * that number only helps up to a point, because TMDb's /discover endpoints
+ * never return past page 500 (10,000 results) for a single query,
+ * regardless of how many pages you ask for. A broad bucket like "all Hindi
+ * movies" or "all English TV shows" has far more than 10,000 titles, so a
+ * flat maxPages — even a generous one — silently drops everything TMDb
+ * would have returned past that cap.
+ *
+ * Splitting the same query by release year keeps each individual request's
+ * total_pages well under 500, so nothing gets dropped. Used only by the
+ * GitHub Actions deep backfill (scripts/full-sync.ts), never by the daily
+ * Vercel cron step — a full year-by-year walk per language/country is far
+ * too slow for a 10s/60s function budget, but is exactly what full-sync's
+ * uncapped GitHub Actions runtime is for.
+ *
+ * IMPORTANT: unlike paged(), this does NOT return one big array for the
+ * caller to upsert at the end. `onBatch` is awaited after every single
+ * page, writing straight to Supabase as results come in. A full run across
+ * ~11 languages x ~95 years is easily multiple hours — if it ran fully
+ * in-memory and only upserted once at the very end of each language, a job
+ * that gets killed by GitHub Actions' timeout-minutes partway through would
+ * lose that entire language's progress. Upserting per page means whatever
+ * has been fetched by the time the job stops is already saved — safe to
+ * just re-run the workflow later (see scripts/full-sync.ts for
+ * from-year/to-year inputs that let you split the work across runs).
+ */
+async function pagedYearChunked<T>(
+  fetchPage: (page: number, year: number) => Promise<{ results: T[]; total_pages: number }>,
+  onBatch: (items: T[]) => Promise<void>,
+  opts: { fromYear?: number; toYear?: number } = {}
+) {
+  const fromYear = opts.fromYear ?? 1930
+  const toYear = opts.toYear ?? new Date().getFullYear() + 1
+  let total = 0
+
+  for (let year = toYear; year >= fromYear; year--) {
+    let page = 1
+    while (true) {
+      const res = await fetchPage(page, year)
+      if (res.results.length) {
+        await onBatch(res.results)
+        total += res.results.length
+      }
+      if (page >= res.total_pages || res.total_pages === 0) break
+      page++
+      await tmdb.sleep(300)
+    }
+    await tmdb.sleep(300)
+  }
+  return total
+}
+
 // Batched versions of the single-item upserts above. One round-trip per
 // call instead of one per row. This is the actual fix for the step=19
 // timeouts: TMDb latency was never the bottleneck — awaiting
@@ -323,6 +380,24 @@ export async function syncRegionalTV(supabase: AdminClient, countryCode: string,
   const items = await paged((p) => tmdb.discoverTVByOriginCountry(countryCode, p), maxPages)
   await upsertTVListFromItems(supabase, items)
   return items.length
+}
+
+/** Optional sub-range for the *Deep sync functions — lets scripts/full-sync.ts
+ * split an otherwise multi-hour run across several manually-triggered
+ * GitHub Actions runs (e.g. one run for 2015-2027, another for 1930-2014)
+ * instead of needing it to finish start-to-end in a single invocation. */
+export type YearRange = { fromYear?: number; toYear?: number }
+
+/** Year-chunked, uncapped version of syncRegionalTV — used only by
+ * scripts/full-sync.ts. See pagedYearChunked() for why this replaces a flat
+ * maxPages for the deep backfill. Upserts as each year's page comes back
+ * (see pagedYearChunked) rather than only at the end. */
+export async function syncRegionalTVDeep(supabase: AdminClient, countryCode: string, range: YearRange = {}) {
+  return pagedYearChunked(
+    (page, year) => tmdb.discoverTVByOriginCountry(countryCode, page, { first_air_date_year: year }),
+    (items) => upsertTVListFromItems(supabase, items),
+    range
+  )
 }
 
 /**
@@ -377,6 +452,98 @@ export async function syncRegionalMovies(supabase: AdminClient, languageCode: st
   const items = await paged((p) => tmdb.discoverMoviesByLanguage(languageCode, p), maxPages)
   await upsertMoviesFromListItems(supabase, items)
   return items.length
+}
+
+/** Same source as syncRegionalMovies, but walks every release year so the
+ * result isn't capped at TMDb's 10,000-result-per-query ceiling. See
+ * pagedYearChunked() for why. Used only by scripts/full-sync.ts. */
+export async function syncRegionalMoviesDeep(supabase: AdminClient, languageCode: string, range: YearRange = {}) {
+  return pagedYearChunked(
+    (page, year) => tmdb.discoverMoviesByLanguage(languageCode, page, { primary_release_year: year }),
+    (items) => upsertMoviesFromListItems(supabase, items),
+    range
+  )
+}
+
+/** English-original TV shows, swept by language (not origin country) since
+ * English TV comes out of the US, UK, Canada, Australia, Ireland, etc. —
+ * see the note on TV_ORIGINAL_LANGUAGES in lib/tmdb.ts. */
+export async function syncRegionalTVByLanguage(supabase: AdminClient, languageCode: string, maxPages = 5) {
+  const items = await paged((p) => tmdb.discoverTVByLanguage(languageCode, p), maxPages)
+  await upsertTVListFromItems(supabase, items)
+  return items.length
+}
+
+/** Year-chunked, uncapped version of syncRegionalTVByLanguage — used only by
+ * scripts/full-sync.ts. */
+export async function syncRegionalTVByLanguageDeep(supabase: AdminClient, languageCode: string, range: YearRange = {}) {
+  return pagedYearChunked(
+    (page, year) => tmdb.discoverTVByLanguage(languageCode, page, { first_air_date_year: year }),
+    (items) => upsertTVListFromItems(supabase, items),
+    range
+  )
+}
+
+/**
+ * Fills the gap behind complaint #2: plenty of popular Bengali OTT titles
+ * (hoichoi, Chorki, Zee5, Bongo, Addatimes originals) never surface from the
+ * language/country sweeps above because TMDb's `original_language`/
+ * `origin_country` metadata for them is inconsistent — but TMDb *does* know
+ * which watch provider they're on. Discovering directly by watch provider
+ * catches those. `watchRegion` should be a region TMDb/JustWatch actually
+ * covers for these platforms — currently that's `IN`, not `BD` (see
+ * lib/tmdb.ts). Returns 0 (and logs a warning) if none of `providerNames`
+ * resolve to a real provider id for that region, rather than throwing —
+ * provider coverage shifts over time and shouldn't fail the whole sync run.
+ */
+export async function syncByWatchProviders(
+  supabase: AdminClient,
+  mediaType: 'movie' | 'tv',
+  watchRegion: string,
+  providerNames: string[],
+  maxPages = 10
+) {
+  const ids = await tmdb.resolveWatchProviderIds(mediaType, watchRegion, providerNames)
+  if (!ids.length) {
+    console.warn(`[sync] no TMDb watch providers matched region=${watchRegion} names=${providerNames.join(', ')}`)
+    return 0
+  }
+  if (mediaType === 'movie') {
+    const items = await paged((p) => tmdb.discoverMoviesByWatchProviders(watchRegion, ids, p), maxPages)
+    await upsertMoviesFromListItems(supabase, items)
+    return items.length
+  }
+  const items = await paged((p) => tmdb.discoverTVByWatchProviders(watchRegion, ids, p), maxPages)
+  await upsertTVListFromItems(supabase, items)
+  return items.length
+}
+
+/** Year-chunked, uncapped version of syncByWatchProviders — used only by
+ * scripts/full-sync.ts. */
+export async function syncByWatchProvidersDeep(
+  supabase: AdminClient,
+  mediaType: 'movie' | 'tv',
+  watchRegion: string,
+  providerNames: string[],
+  range: YearRange = {}
+) {
+  const ids = await tmdb.resolveWatchProviderIds(mediaType, watchRegion, providerNames)
+  if (!ids.length) {
+    console.warn(`[sync] no TMDb watch providers matched region=${watchRegion} names=${providerNames.join(', ')}`)
+    return 0
+  }
+  if (mediaType === 'movie') {
+    return pagedYearChunked(
+      (page, year) => tmdb.discoverMoviesByWatchProviders(watchRegion, ids, page, { primary_release_year: year }),
+      (items) => upsertMoviesFromListItems(supabase, items),
+      range
+    )
+  }
+  return pagedYearChunked(
+    (page, year) => tmdb.discoverTVByWatchProviders(watchRegion, ids, page, { first_air_date_year: year }),
+    (items) => upsertTVListFromItems(supabase, items),
+    range
+  )
 }
 
 export async function refreshStale(supabase: AdminClient) {
@@ -460,15 +627,24 @@ export async function syncIncrementalChanges(supabase: AdminClient) {
 // Ordered list of every sync job. Shared by runDailySync() (one big run —
 // fine on Pro, or locally) and runSyncStep() (one job per invocation — needed
 // on the Hobby plan's 60s function cap). Index in this array is what
-// ?step=N in the cron route refers to, so don't reorder EXISTING entries
-// without also updating vercel.json's step indices — new steps should be
-// appended at the end (as incremental_changes is here) rather than inserted
-// in the middle.
+// ?step=N in the cron route refers to. This particular edit added new
+// sources in the middle of the list (English TV, Bengali OTT platforms),
+// which does shift every later index — vercel.json was regenerated in the
+// same change to match the new count/order below. If you add more sources
+// later without also touching vercel.json, append them at the end instead.
 function buildSyncSteps(supabase: AdminClient): [string, () => Promise<number>][] {
+  // See lib/tmdb.ts: TMDb/JustWatch don't reliably expose `BD` as a discover
+  // watch region, so these Bengali OTT platforms are looked up under `IN`.
+  const OTT_WATCH_REGION = 'IN'
+  const OTT_PROVIDER_NAMES = ['hoichoi', 'Chorki', 'Zee5', 'Bongo', 'Addatimes']
+
   return [
     ['trending_and_popular', () => syncTrendingAndPopular(supabase)],
     ...tmdb.TV_ORIGIN_COUNTRIES.map((c): [string, () => Promise<number>] => [`tv_${c}`, () => syncRegionalTV(supabase, c)]),
+    ...tmdb.TV_ORIGINAL_LANGUAGES.map((l): [string, () => Promise<number>] => [`tv_lang_${l}`, () => syncRegionalTVByLanguage(supabase, l)]),
     ...tmdb.TV_ORIGIN_COUNTRIES.map((c): [string, () => Promise<number>] => [`tv_wikidata_${c}`, () => syncRegionalTVFromWikidata(supabase, c)]),
+    ['ott_movies_bd', () => syncByWatchProviders(supabase, 'movie', OTT_WATCH_REGION, OTT_PROVIDER_NAMES)],
+    ['ott_tv_bd', () => syncByWatchProviders(supabase, 'tv', OTT_WATCH_REGION, OTT_PROVIDER_NAMES)],
     ...tmdb.MOVIE_ORIGINAL_LANGUAGES.map((l): [string, () => Promise<number>] => [`movies_${l}`, () => syncRegionalMovies(supabase, l)]),
     ['refresh_stale', () => refreshStale(supabase)],
     ['incremental_changes', () => syncIncrementalChanges(supabase)],

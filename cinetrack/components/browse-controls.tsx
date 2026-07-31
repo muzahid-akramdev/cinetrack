@@ -78,7 +78,7 @@ export function FilterBar({
           <option value="popularity">Popularity</option>
           <option value="rating">Rating</option>
           <option value="date">Release date</option>
-          <option value="az">A–Z</option>
+          <option value="az">A-Z</option>
         </select>
       </Field>
 
@@ -102,35 +102,51 @@ export function Pagination({
   basePath,
   searchParams,
   page,
-  totalPages = 1,
+  totalPages,
 }: {
   basePath: string
   searchParams: Record<string, string | undefined>
   page: number
-  totalPages?: number
+  totalPages: number
 }) {
-  const safeTotal = Math.max(1, Number.isFinite(totalPages) ? totalPages : 1)
-  const safePage = Math.min(Math.max(1, page), safeTotal)
+  var safeTotal = 1
+  if (typeof totalPages === 'number' && isFinite(totalPages) && totalPages > 1) {
+    safeTotal = Math.floor(totalPages)
+  }
 
-  if (safeTotal <= 1) return null
+  var safePage = page
+  if (safePage < 1) safePage = 1
+  if (safePage > safeTotal) safePage = safeTotal
+
+  if (safeTotal <= 1) {
+    return null
+  }
 
   function makeHref(p: number) {
-    const params = new URLSearchParams()
-    for (const [key, value] of Object.entries(searchParams)) {
+    var params = new URLSearchParams()
+    var keys = Object.keys(searchParams)
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
       if (key === 'page') continue
+      var value = searchParams[key]
       if (value == null || value === '') continue
       params.set(key, String(value))
     }
     params.set('page', String(p))
-    const qs = params.toString()
-    return qs ? `\( {basePath}? \){qs}` : basePath
+    var qs = params.toString()
+    if (qs.length > 0) {
+      return basePath + '?' + qs
+    }
+    return basePath
   }
 
-  const windowSize = 2
-  const start = Math.max(1, safePage - windowSize)
-  const end = Math.min(safeTotal, safePage + windowSize)
-  const nums: number[] = []
-  for (let i = start; i <= end; i++) nums.push(i)
+  var windowSize = 2
+  var start = Math.max(1, safePage - windowSize)
+  var end = Math.min(safeTotal, safePage + windowSize)
+  var nums = []
+  for (var n = start; n <= end; n++) {
+    nums.push(n)
+  }
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-2 py-8">
@@ -145,29 +161,31 @@ export function Pagination({
         <span className="w-16" />
       )}
 
-      {start > 1 && (
+      {start > 1 ? (
         <>
           <PageNum href={makeHref(1)} active={safePage === 1}>
             1
           </PageNum>
-          {start > 2 && <span className="px-1 text-muted dark:text-mutedDark">…</span>}
+          {start > 2 ? <span className="px-1 text-muted dark:text-mutedDark">...</span> : null}
         </>
-      )}
+      ) : null}
 
-      {nums.map((n) => (
-        <PageNum key={n} href={makeHref(n)} active={n === safePage}>
-          {n}
-        </PageNum>
-      ))}
+      {nums.map(function (n) {
+        return (
+          <PageNum key={n} href={makeHref(n)} active={n === safePage}>
+            {n}
+          </PageNum>
+        )
+      })}
 
-      {end < safeTotal && (
+      {end < safeTotal ? (
         <>
-          {end < safeTotal - 1 && <span className="px-1 text-muted dark:text-mutedDark">…</span>}
+          {end < safeTotal - 1 ? <span className="px-1 text-muted dark:text-mutedDark">...</span> : null}
           <PageNum href={makeHref(safeTotal)} active={safePage === safeTotal}>
             {safeTotal}
           </PageNum>
         </>
-      )}
+      ) : null}
 
       {safePage < safeTotal ? (
         <Link
@@ -192,15 +210,12 @@ function PageNum({
   active: boolean
   children: React.ReactNode
 }) {
+  var className = active
+    ? 'flex h-9 min-w-9 items-center justify-center rounded-lg bg-marquee px-2 font-mono text-sm font-semibold text-ink'
+    : 'flex h-9 min-w-9 items-center justify-center rounded-lg border border-line px-2 font-mono text-sm hover:border-marquee dark:border-lineDark'
+
   return (
-    <Link
-      href={href}
-      className={
-        active
-          ? 'flex h-9 min-w-9 items-center justify-center rounded-lg bg-marquee px-2 font-mono text-sm font-semibold text-ink'
-          : 'flex h-9 min-w-9 items-center justify-center rounded-lg border border-line px-2 font-mono text-sm hover:border-marquee dark:border-lineDark'
-      }
-    >
+    <Link href={href} className={className}>
       {children}
     </Link>
   )

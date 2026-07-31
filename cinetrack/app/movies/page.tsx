@@ -7,17 +7,38 @@ export const revalidate = 3600
 const PAGE_SIZE = 24
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  en: 'English', ko: 'Korean', tr: 'Turkish', hi: 'Hindi', bn: 'Bengali',
-  ta: 'Tamil', te: 'Telugu', ml: 'Malayalam', kn: 'Kannada', pa: 'Punjabi',
-  ur: 'Urdu', ja: 'Japanese', es: 'Spanish', fr: 'French',
+  en: 'English',
+  ko: 'Korean',
+  tr: 'Turkish',
+  hi: 'Hindi',
+  bn: 'Bengali',
+  ta: 'Tamil',
+  te: 'Telugu',
+  ml: 'Malayalam',
+  kn: 'Kannada',
+  pa: 'Punjabi',
+  ur: 'Urdu',
+  ja: 'Japanese',
+  es: 'Spanish',
+  fr: 'French',
 }
 
 const COUNTRY_LABELS: Record<string, string> = {
-  BD: 'Bangladesh', IN: 'India', PK: 'Pakistan', TR: 'Turkey', KR: 'South Korea',
-  US: 'United States', GB: 'United Kingdom', JP: 'Japan',
+  BD: 'Bangladesh',
+  IN: 'India',
+  PK: 'Pakistan',
+  TR: 'Turkey',
+  KR: 'South Korea',
+  US: 'United States',
+  GB: 'United Kingdom',
+  JP: 'Japan',
 }
 
-export default async function MoviesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+export default async function MoviesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>
+}) {
   const sp = await searchParams
   const page = Math.max(1, Number(sp.page ?? '1'))
   const supabase = await createClient()
@@ -27,7 +48,11 @@ export default async function MoviesPage({ searchParams }: { searchParams: Promi
   if (sp.genre) query = query.contains('genres', [sp.genre])
   if (sp.language) query = query.eq('original_language', sp.language)
   if (sp.country) query = query.contains('countries', [sp.country])
-  if (sp.year) query = query.gte('release_date', `${sp.year}-01-01`).lte('release_date', `${sp.year}-12-31`)
+  if (sp.year) {
+    query = query
+      .gte('release_date', sp.year + '-01-01')
+      .lte('release_date', sp.year + '-12-31')
+  }
   if (sp.min_rating) query = query.gte('tmdb_rating', Number(sp.min_rating))
 
   switch (sp.sort) {
@@ -46,7 +71,7 @@ export default async function MoviesPage({ searchParams }: { searchParams: Promi
 
   const from = (page - 1) * PAGE_SIZE
   const { data: movies, count } = await query.range(from, from + PAGE_SIZE - 1)
-  const hasMore = count ? from + PAGE_SIZE < count : false
+  const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE))
 
   return (
     <div>
@@ -54,27 +79,45 @@ export default async function MoviesPage({ searchParams }: { searchParams: Promi
       <FilterBar
         searchParams={sp}
         genres={Object.values(MOVIE_GENRE_MAP)}
-        languages={MOVIE_ORIGINAL_LANGUAGES.map((code) => ({ code, label: LANGUAGE_LABELS[code] ?? code }))}
-        countries={Object.entries(COUNTRY_LABELS).map(([code, label]) => ({ code, label }))}
+        languages={MOVIE_ORIGINAL_LANGUAGES.map(function (code) {
+          return { code: code, label: LANGUAGE_LABELS[code] ?? code }
+        })}
+        countries={Object.entries(COUNTRY_LABELS).map(function (entry) {
+          return { code: entry[0], label: entry[1] }
+        })}
       />
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {(movies ?? []).map((m) => (
-          <MediaCard key={m.id} title={m.title} year={m.release_date?.slice(0, 4)} posterPath={m.poster_path} rating={m.tmdb_rating} href={`/movie/${m.id}`} />
-        ))}
+        {(movies ?? []).map(function (m) {
+          return (
+            <MediaCard
+              key={m.id}
+              title={m.title}
+              year={m.release_date ? m.release_date.slice(0, 4) : null}
+              posterPath={m.poster_path}
+              rating={m.tmdb_rating}
+              href={'/movie/' + m.id}
+            />
+          )
+        })}
       </div>
+      {!movies?.length && (
+        <p className="py-12 text-center text-muted dark:text-mutedDark">
+          No movies match those filters yet.
+        </p>
+      )}
       <Pagination
-  basePath="/movies"
-  searchParams={{
-    genre: sp.genre,
-    language: sp.language,
-    country: sp.country,
-    year: sp.year,
-    min_rating: sp.min_rating,
-    sort: sp.sort,
-  }}
-  page={page}
-  totalPages={Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE))}
-/>
+        basePath="/movies"
+        searchParams={{
+          genre: sp.genre,
+          language: sp.language,
+          country: sp.country,
+          year: sp.year,
+          min_rating: sp.min_rating,
+          sort: sp.sort,
+        }}
+        page={page}
+        totalPages={totalPages}
+      />
     </div>
   )
 }
